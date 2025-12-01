@@ -1,4 +1,4 @@
-# tucheque
+# usuarios-service
 
 
 
@@ -15,7 +15,7 @@ Already a pro? Just edit this README.md and make it your own. Want to make it ea
 
 ```
 cd existing_repo
-git remote add origin https://gitlab.com/tuprestamouy/tucheque.git
+git remote add origin https://github.com/julio-tabera/usuarios-service.git
 git branch -M main
 git push -uf origin main
 ```

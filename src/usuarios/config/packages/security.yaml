@@ -1,17 +1,23 @@
 security:
-    # https://symfony.com/doc/current/security.html#registering-the-user-hashing-passwords
-    password_hashers:
-        Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface: 'auto'
-    # https://symfony.com/doc/current/security.html#loading-the-user-the-user-provider
+    enable_authenticator_manager: true
     providers:
-        users_in_memory: { memory: null }
+      jwt:
+         lexik_jwt:
+             class: App\Security\User  # entidad que representa el usuario que viene del token JWT
+
     firewalls:
         dev:
             pattern: ^/(_(profiler|wdt)|css|images|js)/
             security: false
-        main:
-            lazy: true
-            provider: users_in_memory
+
+        # Rutas protegidas por JWT
+        api:
+           # Aquí incluyes todas las rutas que quieras proteger con token
+           pattern: ^/client
+           stateless: true
+           jwt: ~
+           provider: jwt
+
 
             # activate different ways to authenticate
             # https://symfony.com/doc/current/security.html#the-firewall
@@ -22,8 +28,10 @@ security:
     # Easy way to control access for large sections of your site
     # Note: Only the *first* access control that matches will be used
     access_control:
-        # - { path: ^/admin, roles: ROLE_ADMIN }
-        # - { path: ^/profile, roles: ROLE_USER }
+    # Rutas bajo /client que SÍ requieren estar autenticado con JWT
+    # (usuario-logueado, usuario_find, y cualquier otra que agregues)
+         - { path: ^/client, roles: IS_AUTHENTICATED_FULLY }
+
 
 when@test:
     security:
