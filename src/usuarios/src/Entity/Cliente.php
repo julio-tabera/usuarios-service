@@ -53,8 +53,8 @@ class Cliente
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
-    #[ORM\ManyToOne]
-    private ?NEstadoCliente $estadoCliente = null;
+//    #[ORM\ManyToOne]
+//    private ?NEstadoCliente $estadoCliente = null;
 
     #[ORM\ManyToOne(inversedBy: 'cliente')]
     private ?NTipoCuenta $tipoCuenta;
@@ -224,15 +224,15 @@ class Cliente
         $this->tipoCuenta = $tipoCuenta;
     }
 
-    public function getEstadoCliente(): ?NEstadoCliente
-    {
-        return $this->estadoCliente;
-    }
-
-    public function setEstadoCliente(?NEstadoCliente $estadoCliente): void
-    {
-        $this->estadoCliente = $estadoCliente;
-    }
+//    public function getEstadoCliente(): ?NEstadoCliente
+//    {
+//        return $this->estadoCliente;
+//    }
+//
+//    public function setEstadoCliente(?NEstadoCliente $estadoCliente): void
+//    {
+//        $this->estadoCliente = $estadoCliente;
+//    }
 
 
 
