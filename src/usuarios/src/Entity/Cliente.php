@@ -56,9 +56,6 @@ class Cliente
 //    #[ORM\ManyToOne]
 //    private ?NEstadoCliente $estadoCliente = null;
 
-    #[ORM\ManyToOne(inversedBy: 'cliente')]
-    private ?NTipoCuenta $tipoCuenta;
-
 
     #[ORM\OneToMany(targetEntity: EmailAnteriores::class, mappedBy: 'cliente', cascade: ['persist', 'remove'])]
     private Collection $emailsAnteriores;
@@ -209,19 +206,6 @@ class Cliente
     public function setCreatedAt(\DateTimeImmutable $createdAt): void
     {
         $this->createdAt = $createdAt;
-    }
-
-
-
-
-    public function getTipoCuenta(): ?NTipoCuenta
-    {
-        return $this->tipoCuenta;
-    }
-
-    public function setTipoCuenta(?NTipoCuenta $tipoCuenta): void
-    {
-        $this->tipoCuenta = $tipoCuenta;
     }
 
 //    public function getEstadoCliente(): ?NEstadoCliente

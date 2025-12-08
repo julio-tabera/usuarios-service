@@ -3,13 +3,13 @@
 namespace App\Controller;
 
 use App\Entity\Cliente;
+use App\Entity\EmailAnteriores;
 use App\Entity\Nomencladores\NEstadoCliente;
-use App\Enum\TipoCuentaEnum;
 use App\Helper\EncryptHelper;
 use App\Helper\ValidacionesHelper;
 use App\Repository\ClienteRepository;
+use App\Repository\EmailAnterioresRepository;
 use App\Repository\Nomencladores\NEstadoClienteRepository;
-use App\Repository\Nomencladores\NTipoCuentaRepository;
 use App\Validator\EmailRobusto;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -31,7 +31,6 @@ class ApiClientServiceController extends AbstractController
     #[Route('/create-clients', methods: ['POST'])]
     public function createClients(Request               $request,
                                   ClienteRepository     $clienteRepository,
-                                  NTipoCuentaRepository $tipoCuentaRepository,
                                   ValidatorInterface    $validator,
                                   ValidacionesHelper    $validacionesHelper): JsonResponse
     {
@@ -111,7 +110,6 @@ class ApiClientServiceController extends AbstractController
                 $cliente->setEmail($data['email']);
                 $cliente->setCellNumber($data['cellNumber']);
                 $cliente->setIdentification($data['identification']);
-                $cliente->setTipoCuenta($tipoCuentaRepository->find(TipoCuentaEnum::cuenta_cliente));
                 $clienteRepository->save($cliente, true);
                 return $this->json([
                     'estado' => 'OK',
@@ -192,8 +190,7 @@ class ApiClientServiceController extends AbstractController
                     'lastName' => $cliente->getLastName(),
                     'email' => $cliente->getEmail(),
                     'cellNumber' => $cliente->getCellNumber(),
-                    'identification' => $cliente->getIdentification(),
-                    'tipoCuenta' => $cliente->getTipoCuenta()->getNombre() ?? null
+                    'identification' => $cliente->getIdentification()
                 ]
             ], Response::HTTP_OK);
 
@@ -308,6 +305,97 @@ class ApiClientServiceController extends AbstractController
         }
     }
 // </editor-fold>
+
+    // <editor-fold defaultstate="collapsed" desc="API AGREGAR EMAILS A CLIENTE">
+    #[Route('/add-emails', methods: ['POST'])]
+    public function addEmails(Request               $request,
+                                  ClienteRepository     $clienteRepository,
+                                  EmailAnterioresRepository $emailAnterioresRepository,
+                                  ValidatorInterface    $validator,
+                                  ValidacionesHelper    $validacionesHelper): JsonResponse
+    {
+        if ($request->getMethod() == Request::METHOD_POST) {
+            try {
+
+                $header = $request->headers->get('client-tokenid');
+                if (!$validacionesHelper->validarCredencialesHeaders($header)) {
+                    return $this->json([
+                        'estado' => 'ERROR',
+                        'mensaje' => 'Error en la conexion'
+                    ], Response::HTTP_UNAUTHORIZED);
+                }
+
+                $data = json_decode($request->getContent(), true);
+
+                // verifica que la codificacion del json haya sido correcta
+                if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
+                    return $this->json([
+                        'estado' => 'ERROR',
+                        'mensaje' => 'Json inválido'
+                    ], Response::HTTP_BAD_REQUEST);
+                }
+
+                // usuarioId viene del JWT del Auth-Service
+                $usuarioId = $this->getUser()->getId();
+
+                // Ahora esto funcionará porque $usuario es instancia de App\Security\User
+                // verificacion del usuario del JWT
+
+                if (is_null($usuarioId)) {
+                    return $this->json([
+                        'estado' => 'ERROR',
+                        'mensaje' => 'No se encontraron respuestas'
+                    ], Response::HTTP_UNAUTHORIZED);
+                }
+
+                // se verifica si las variables estan definidas y no estan vacias en el array data
+                $requiredFields = [
+                    'cliente_id' => 'Cliente requerido',
+                    'email' => 'Email requerido'
+                ];
+                $mensajeErrorField = $validacionesHelper->validarCamposdelCuerpo($requiredFields, $data);
+                if (!is_null($mensajeErrorField)) {
+                    return $this->json([
+                        'estado' => 'ERROR',
+                        'mensaje' => $mensajeErrorField
+                    ], Response::HTTP_BAD_REQUEST);
+                }
+
+                // Validacion de email
+                $errorValidacionEmail = $validator->validate($data['email'], new EmailRobusto());
+                if (count($errorValidacionEmail) > 0) {
+                    return $this->json([
+                        'estado' => 'ERROR',
+                        'mensaje' => $errorValidacionEmail[0]->getMessage()
+                    ], Response::HTTP_BAD_REQUEST);
+                }
+
+                // Validación de cliente repetido
+                $cliente = $clienteRepository->find([$data['cliente_id']]);
+                if (!$cliente) {
+                    return $this->json([
+                        'estado' => 'ERROR',
+                        'mensaje' => "El cliente no encontrado"],
+                        Response::HTTP_BAD_REQUEST);
+                }
+                $email = new EmailAnteriores();
+                $email->setEmail($data['email']);
+                $email->setCliente($cliente);
+                $emailAnterioresRepository->save($email, true);
+                return $this->json([
+                    'estado' => 'OK',
+                    'mensaje' => "Email agregado correctamente"], Response::HTTP_OK);
+
+            } catch (\Exception $ex) {
+                $validacionesHelper->escribirLog('ERROR ' . $ex->getMessage(), 'log_add_email_cliente');
+                return $this->json(['estado' => 'ERROR', 'mensaje' => 'Error interno'], Response::HTTP_INTERNAL_SERVER_ERROR);
+            }
+
+        }
+        return $this->json(['estado' => 'ERROR', 'mensaje' => 'No se encontraron respuestas'], Response::HTTP_NOT_ACCEPTABLE);
+    }
+
+    // </editor-fold>
 
     // </editor-fold>
 

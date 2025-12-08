@@ -16,6 +16,24 @@ class EmailAnterioresRepository extends ServiceEntityRepository
         parent::__construct($registry, EmailAnteriores::class);
     }
 
+    public function save(EmailAnteriores $entity, bool $flush = false): void
+    {
+        $this->getEntityManager()->persist($entity);
+
+        if ($flush) {
+            $this->getEntityManager()->flush();
+        }
+    }
+
+    public function remove(EmailAnteriores $entity, bool $flush = false): void
+    {
+        $this->getEntityManager()->remove($entity);
+
+        if ($flush) {
+            $this->getEntityManager()->flush();
+        }
+    }
+
     //    /**
     //     * @return EmailAnteriores[] Returns an array of EmailAnteriores objects
     //     */

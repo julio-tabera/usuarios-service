@@ -1,0 +1,4 @@
+01:58:53
+ERROR An exception occurred while executing a query: SQLSTATE[42P01]: Undefined table: 7 ERROR:  relation "cliente" does not exist
+LINE 1: ...t_10, t0.tipo_cuenta_id AS tipo_cuenta_id_11 FROM cliente t0...
+                                                             ^
