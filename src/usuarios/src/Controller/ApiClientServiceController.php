@@ -3,20 +3,15 @@
 namespace App\Controller;
 
 use App\Entity\Cliente;
-use App\Entity\EmailAnteriores;
-use App\Entity\Nomencladores\NEstadoCliente;
-use App\Helper\EncryptHelper;
 use App\Helper\ValidacionesHelper;
 use App\Repository\ClienteRepository;
-use App\Repository\EmailAnterioresRepository;
-use App\Repository\Nomencladores\NEstadoClienteRepository;
 use App\Validator\EmailRobusto;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Validator\Constraints\Email;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 #[Route('/client')]
@@ -29,10 +24,10 @@ class ApiClientServiceController extends AbstractController
 
     // <editor-fold defaultstate="collapsed" desc="API REGISTRAR CLIENTES">
     #[Route('/create-clients', methods: ['POST'])]
-    public function createClients(Request               $request,
-                                  ClienteRepository     $clienteRepository,
-                                  ValidatorInterface    $validator,
-                                  ValidacionesHelper    $validacionesHelper): JsonResponse
+    public function createClients(Request            $request,
+                                  ClienteRepository  $clienteRepository,
+                                  ValidatorInterface $validator,
+                                  ValidacionesHelper $validacionesHelper): JsonResponse
     {
         if ($request->getMethod() == Request::METHOD_POST) {
             try {
@@ -126,11 +121,13 @@ class ApiClientServiceController extends AbstractController
 
     // </editor-fold>
 
-    // <editor-fold defaultstate="collapsed" desc="API OBTENER CLIENTE POR IDENTIFICACION">
+    // <editor-fold defaultstate="collapsed" desc="API OBTENER CLIENTE POR ID O IDENTIFICACION">
     #[Route('/find-clients', methods: ['POST'])]
-    public function clienteFind(Request            $request,
-                                ClienteRepository  $clienteRepository,
-                                ValidacionesHelper $validacionesHelper): JsonResponse
+    public function clienteFind(
+        Request            $request,
+        ClienteRepository  $clienteRepository,
+        ValidacionesHelper $validacionesHelper
+    ): JsonResponse
     {
         try {
             // Validar credenciales internas
@@ -141,9 +138,9 @@ class ApiClientServiceController extends AbstractController
                     'mensaje' => 'Error en la conexión'
                 ], Response::HTTP_UNAUTHORIZED);
             }
-            $data = json_decode($request->getContent(), true);
 
-            // verifica que la codificacion del json haya sido correcta
+            // Leer JSON
+            $data = json_decode($request->getContent(), true);
             if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
                 return $this->json([
                     'estado' => 'ERROR',
@@ -151,30 +148,44 @@ class ApiClientServiceController extends AbstractController
                 ], Response::HTTP_BAD_REQUEST);
             }
 
-            // se verifica si la clave username o id esta definida en el array data y no sean vacias
-            if (!isset($data['identification']) || empty(trim($data['identification']))) {
-                return $this->json(['estado' => 'ERROR', 'mensaje' => 'Identificacion requerida'], Response::HTTP_BAD_REQUEST);
-            }
-
-            // usuarioId viene del JWT del Auth-Service
+            // Usuario autenticado (JWT)
             $usuarioId = $this->getUser()->getId();
-
-            // Ahora esto funcionará porque $usuario es instancia de App\Security\User
-            // verificacion del usuario del JWT
-
-            if (is_null($usuarioId)) {
+            if (!$usuarioId) {
                 return $this->json([
                     'estado' => 'ERROR',
-                    'mensaje' => 'No se encontraron respuestas'
+                    'mensaje' => 'Usuario no autenticado'
                 ], Response::HTTP_UNAUTHORIZED);
             }
 
-            // Buscar cliente por identificación y por usuario
-            $cliente = $clienteRepository->findOneBy([
-                'identification' => $data['identification'],
-                'usuarioIdAutenticacionService' =>  $usuarioId
-            ]);
+            // Validar parámetros
+            $hasId = isset($data['id']) && is_numeric($data['id']);
+            $hasIdentification = isset($data['identification']) && trim($data['identification']) !== '';
 
+            if ($hasId && $hasIdentification) {
+                return $this->json([
+                    'estado' => 'ERROR',
+                    'mensaje' => 'Debe enviar solo id o identificación, no ambos'
+                ], Response::HTTP_BAD_REQUEST);
+            }
+
+            if ($hasIdentification) {
+                $cliente = $clienteRepository->findOneBy([
+                    'identification' => $data['identification'],
+                    'usuarioIdAutenticacionService' => $usuarioId
+                ]);
+            } elseif ($hasId) {
+                $cliente = $clienteRepository->findOneBy([
+                    'id' => (int)$data['id'],
+                    'usuarioIdAutenticacionService' => $usuarioId
+                ]);
+            } else {
+                return $this->json([
+                    'estado' => 'ERROR',
+                    'mensaje' => 'Identificación o id requerido'
+                ], Response::HTTP_BAD_REQUEST);
+            }
+
+            // Cliente no encontrado
             if (!$cliente) {
                 return $this->json([
                     'estado' => 'ERROR',
@@ -182,6 +193,7 @@ class ApiClientServiceController extends AbstractController
                 ], Response::HTTP_NOT_FOUND);
             }
 
+            // Respuesta
             $response = $this->json([
                 'estado' => 'OK',
                 'cliente' => [
@@ -194,29 +206,32 @@ class ApiClientServiceController extends AbstractController
                 ]
             ], Response::HTTP_OK);
 
-            // Para evitar que proxies o navegadores almacenen la información del usuario
             $response->headers->set('Cache-Control', 'no-store');
             return $response;
 
         } catch (\Exception $ex) {
-            $validacionesHelper->escribirLog('ERROR ' . $ex->getMessage(), 'log_find_client');
+            $validacionesHelper->escribirLog(
+                'ERROR ' . $ex->getMessage(),
+                'log_find_client'
+            );
+
             return $this->json([
                 'estado' => 'ERROR',
                 'mensaje' => 'Error interno'
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
-
     }
-
-
 // </editor-fold>
 
-    // <editor-fold defaultstate="collapsed" desc="API ACTUALIZAR CLIENTE POR IDENTIFICACION">
-    #[Route('/update-clients', methods: ['PUT'])]
-    public function clientUpdate(Request            $request,
+    // <editor-fold defaultstate="collapsed" desc="API ACTUALIZAR CLIENTE POR ID">
+    // id por la ruta
+    // con requirements: ['id' => '\d+'] si el id no es numerico ni siquiera llegue al controlador
+    #[Route('/update-clients/{id}', requirements: ['id' => '\d+'], methods: ['PUT'])]
+    public function clientUpdate(int                $id,
+                                 Request            $request,
                                  ClienteRepository  $clienteRepository,
                                  ValidacionesHelper $validacionesHelper,
-                                 ValidatorInterface    $validator
+                                 ValidatorInterface $validator
     ): JsonResponse
     {
         try {
@@ -241,7 +256,7 @@ class ApiClientServiceController extends AbstractController
             $usuarioId = $this->getUser()->getId();
 
             // Ahora esto funcionará porque $usuario es instancia de App\Security\User
-           // verificacion del usuario del JWT
+            // verificacion del usuario del JWT
             if (is_null($usuarioId)) {
                 return $this->json([
                     'estado' => 'ERROR',
@@ -249,20 +264,8 @@ class ApiClientServiceController extends AbstractController
                 ], Response::HTTP_UNAUTHORIZED);
             }
 
-            // Validar identificación obligatoria
-            if (empty(trim($data['identification'] ?? ''))) {
-                return $this->json([
-                    'estado' => 'ERROR',
-                    'mensaje' => 'Identificación requerida'
-                ], Response::HTTP_BAD_REQUEST);
-            }
-
-            // Buscar cliente por identificación y por usuario
-            $cliente = $clienteRepository->findOneBy([
-                'identification' => $data['identification'],
-                'usuarioIdAutenticacionService' =>  $usuarioId
-            ]);
-
+            // Buscar cliente
+            $cliente = $clienteRepository->findOneBy(['id' => $id, 'usuarioIdAutenticacionService' => $usuarioId]);
             if (!$cliente) {
                 return $this->json([
                     'estado' => 'ERROR',
@@ -273,10 +276,10 @@ class ApiClientServiceController extends AbstractController
             // ===========   PROCESO DE ACTUALIZACION  =========
 
             $requiredFields = [
-                'name'           => $data['name']           ?? null,
-                'lastName'       => $data['lastName']       ?? null,
-                'email'          => $data['email']          ?? null,
-                'cellNumber'     => $data['cellNumber']     ?? null,
+                'name' => $data['name'] ?? null,
+                'lastName' => $data['lastName'] ?? null,
+                'email' => $data['email'] ?? null,
+                'cellNumber' => $data['cellNumber'] ?? null,
                 'identification' => $data['identification'] ?? null,
             ];
 
@@ -306,96 +309,67 @@ class ApiClientServiceController extends AbstractController
     }
 // </editor-fold>
 
-    // <editor-fold defaultstate="collapsed" desc="API AGREGAR EMAILS A CLIENTE">
-    #[Route('/add-emails', methods: ['POST'])]
-    public function addEmails(Request               $request,
-                                  ClienteRepository     $clienteRepository,
-                                  EmailAnterioresRepository $emailAnterioresRepository,
-                                  ValidatorInterface    $validator,
-                                  ValidacionesHelper    $validacionesHelper): JsonResponse
-    {
-        if ($request->getMethod() == Request::METHOD_POST) {
-            try {
-
-                $header = $request->headers->get('client-tokenid');
-                if (!$validacionesHelper->validarCredencialesHeaders($header)) {
-                    return $this->json([
-                        'estado' => 'ERROR',
-                        'mensaje' => 'Error en la conexion'
-                    ], Response::HTTP_UNAUTHORIZED);
-                }
-
-                $data = json_decode($request->getContent(), true);
-
-                // verifica que la codificacion del json haya sido correcta
-                if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
-                    return $this->json([
-                        'estado' => 'ERROR',
-                        'mensaje' => 'Json inválido'
-                    ], Response::HTTP_BAD_REQUEST);
-                }
-
-                // usuarioId viene del JWT del Auth-Service
-                $usuarioId = $this->getUser()->getId();
-
-                // Ahora esto funcionará porque $usuario es instancia de App\Security\User
-                // verificacion del usuario del JWT
-
-                if (is_null($usuarioId)) {
-                    return $this->json([
-                        'estado' => 'ERROR',
-                        'mensaje' => 'No se encontraron respuestas'
-                    ], Response::HTTP_UNAUTHORIZED);
-                }
-
-                // se verifica si las variables estan definidas y no estan vacias en el array data
-                $requiredFields = [
-                    'cliente_id' => 'Cliente requerido',
-                    'email' => 'Email requerido'
-                ];
-                $mensajeErrorField = $validacionesHelper->validarCamposdelCuerpo($requiredFields, $data);
-                if (!is_null($mensajeErrorField)) {
-                    return $this->json([
-                        'estado' => 'ERROR',
-                        'mensaje' => $mensajeErrorField
-                    ], Response::HTTP_BAD_REQUEST);
-                }
-
-                // Validacion de email
-                $errorValidacionEmail = $validator->validate($data['email'], new EmailRobusto());
-                if (count($errorValidacionEmail) > 0) {
-                    return $this->json([
-                        'estado' => 'ERROR',
-                        'mensaje' => $errorValidacionEmail[0]->getMessage()
-                    ], Response::HTTP_BAD_REQUEST);
-                }
-
-                // Validación de cliente repetido
-                $cliente = $clienteRepository->find([$data['cliente_id']]);
-                if (!$cliente) {
-                    return $this->json([
-                        'estado' => 'ERROR',
-                        'mensaje' => "El cliente no encontrado"],
-                        Response::HTTP_BAD_REQUEST);
-                }
-                $email = new EmailAnteriores();
-                $email->setEmail($data['email']);
-                $email->setCliente($cliente);
-                $emailAnterioresRepository->save($email, true);
+    // <editor-fold defaultstate="collapsed" desc="API ELIMINAR CLIENTE (SOLO SUPER ADMIN)">
+    //  id por la ruta
+    //  con requirements: ['id' => '\d+'] si el id no es numerico ni siquiera llegue al controlador
+    #[IsGranted('ROLE_SUPER_ADMIN')]
+    #[Route('/delete-clients/{id}', requirements: ['id' => '\d+'], methods: ['DELETE'])]
+    public function deleteClient(
+        int $id,
+        Request $request,
+        ClienteRepository $clienteRepository,
+        ValidacionesHelper $validacionesHelper
+    ): JsonResponse {
+        try {
+            // Validar credenciales internas
+            $header = $request->headers->get('client-tokenid');
+            if (!$validacionesHelper->validarCredencialesHeaders($header)) {
                 return $this->json([
-                    'estado' => 'OK',
-                    'mensaje' => "Email agregado correctamente"], Response::HTTP_OK);
-
-            } catch (\Exception $ex) {
-                $validacionesHelper->escribirLog('ERROR ' . $ex->getMessage(), 'log_add_email_cliente');
-                return $this->json(['estado' => 'ERROR', 'mensaje' => 'Error interno'], Response::HTTP_INTERNAL_SERVER_ERROR);
+                    'estado' => 'ERROR',
+                    'mensaje' => 'Error en la conexión'
+                ], Response::HTTP_UNAUTHORIZED);
             }
 
-        }
-        return $this->json(['estado' => 'ERROR', 'mensaje' => 'No se encontraron respuestas'], Response::HTTP_NOT_ACCEPTABLE);
-    }
+            // Usuario autenticado (JWT)
+            $user = $this->getUser();
+            if (!$user) {
+                return $this->json([
+                    'estado' => 'ERROR',
+                    'mensaje' => 'No autenticado'
+                ], Response::HTTP_UNAUTHORIZED);
+            }
 
-    // </editor-fold>
+            //  Buscar cliente (SIN filtrar por usuarioId) en el caso del super admin
+            $cliente = $clienteRepository->find($id);
+
+            if (!$cliente) {
+                return $this->json([
+                    'estado' => 'ERROR',
+                    'mensaje' => 'Cliente no encontrado'
+                ], Response::HTTP_NOT_FOUND);
+            }
+
+            // Eliminar cliente
+            $clienteRepository->remove($cliente, true);
+
+            return $this->json([
+                'estado' => 'OK',
+                'mensaje' => 'Cliente eliminado correctamente'
+            ], Response::HTTP_OK);
+
+        } catch (\Exception $ex) {
+            $validacionesHelper->escribirLog(
+                'ERROR ' . $ex->getMessage(),
+                'log_delete_client'
+            );
+
+            return $this->json([
+                'estado' => 'ERROR',
+                'mensaje' => 'Error interno'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+// </editor-fold>
 
     // </editor-fold>
 
